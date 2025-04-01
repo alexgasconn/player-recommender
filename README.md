@@ -22,6 +22,7 @@ A Streamlit web app that recommends players with similar profiles using performa
 <div align="center">
   <img src="https://raw.githubusercontent.com/alexgasconn/player-recommender/main/assets/example_dashboard.png" width="80%" alt="App screenshot">
 </div>
+(to do)
 
 ## 🛠️ How It Works
 
