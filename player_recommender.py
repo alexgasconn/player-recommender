@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore")
 st.set_page_config(
     page_title="FBRef Player Recommender",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # ------------------ STYLES ------------------
@@ -48,18 +48,39 @@ urls = {
     "standard_stats": "https://fbref.com/en/comps/Big5/stats/players/Big-5-European-Leagues-Stats",
     "shooting": "https://fbref.com/en/comps/Big5/shooting/players/Big-5-European-Leagues-Stats",
     "passing": "https://fbref.com/en/comps/Big5/passing/players/Big-5-European-Leagues-Stats",
-    "defense": "https://fbref.com/en/comps/Big5/defense/players/Big-5-European-Leagues-Stats",
-    "gca": "https://fbref.com/en/comps/Big5/gca/players/Big-5-European-Leagues-Stats",
-    "misc": "https://fbref.com/en/comps/Big5/misc/players/Big-5-European-Leagues-Stats"
+    "pass_types": "https://fbref.com/en/comps/Big5/passing_types/players/Big-5-European-Leagues-Stats",
+    "goal_and_shot_creation": "https://fbref.com/en/comps/Big5/gca/players/Big-5-European-Leagues-Stats",
+    "defensive_actions": "https://fbref.com/en/comps/Big5/defense/players/Big-5-European-Leagues-Stats",
+    "possession": "https://fbref.com/en/comps/Big5/possession/players/Big-5-European-Leagues-Stats",
+    "playing_time": "https://fbref.com/en/comps/Big5/playingtime/players/Big-5-European-Leagues-Stats",
+    "miscellaneous_stats": "https://fbref.com/en/comps/Big5/misc/players/Big-5-European-Leagues-Stats"
 }
 
-stat_keys = ["misc", "shooting", "passing", "defense", "gca", "standard_stats"]
+stat_keys = [
+    "standard_stats",
+    "shooting",
+    "passing",
+    "pass_types",
+    "goal_and_shot_creation",
+    "defensive_actions",
+    "possession",
+    "playing_time",
+    "miscellaneous_stats"
+]
 
 # ------------------ DATA PROCESSING ------------------
 
 @st.cache_data
 def load_and_process(url_key):
-    st.write(f"Loading data for: {url_key}")
+    """
+    Load and process data for a given stats group.
+
+    Args:
+        url_key (str): The key for the stats group URL.
+
+    Returns:
+        pd.DataFrame: The processed DataFrame.
+    """
     df = pd.read_html(urls[url_key])[0]
     df.columns = df.columns.droplevel()
     df.columns = df.columns.str.strip().str.lower()
@@ -81,7 +102,6 @@ def load_and_process(url_key):
     numerical_cols = df.select_dtypes(include=np.number).columns
     df[numerical_cols] = scaler.fit_transform(df[numerical_cols])
 
-    st.write(f"Finished processing: {url_key} (rows: {df.shape[0]}, cols: {df.shape[1]})")
     return df
 
 def apply_pca_kmeans(df, name):
@@ -114,6 +134,10 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
     closest_players_per_stat = {}
     combined_distances = {}
 
+    # Get the selected player's position
+    first_df = next(iter(dfs.values()))
+    player_position = first_df[first_df['player'] == player_name]['pos'].values[0]
+
     for stat_name, df in dfs.items():
         if player_name not in df['player'].values:
             st.write(f"Player '{player_name}' not found in {stat_name}. Skipping...")
@@ -139,21 +163,33 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
         weight = position_weights.get(stat_name, 1.0)
         df['weighted_distance'] = df['distance'] * weight
 
+        # Apply position-based bonus/penalty
+        def position_bonus(other_position):
+            if player_position == other_position:  # Same position
+                return -0.1  # Strong bonus
+            elif (player_position == "D" and other_position == "M") or \
+                 (player_position == "M" and other_position in ["D", "F"]) or \
+                 (player_position == "F" and other_position == "M"):  # Adjacent positions
+                return -0.05  # Moderate bonus
+            else:  # Far positions
+                return 0.1  # Penalty
+
+        df['position_bonus'] = df['pos'].apply(position_bonus)
+        df['final_distance'] = df['weighted_distance'] + df['position_bonus']
+
         # Get the top 10 closest players
-        closest_players = df[df['player'] != player_name].sort_values(by='weighted_distance').head(10)
-        closest_players_per_stat[stat_name] = closest_players[['player', 'pos', 'age', 'squad', 'weighted_distance']]
+        closest_players = df[df['player'] != player_name].sort_values(by='final_distance').head(10)
+        closest_players_per_stat[stat_name] = closest_players[['player', 'pos', 'age', 'squad', 'final_distance']]
 
         # Add weighted distances to the combined distances
         for _, row in closest_players.iterrows():
             player = row['player']
-            combined_distances[player] = combined_distances.get(player, 0) + row['weighted_distance']
+            combined_distances[player] = combined_distances.get(player, 0) + row['final_distance']
 
     # Create a final DataFrame for combined distances
     combined_df = pd.DataFrame(list(combined_distances.items()), columns=['player', 'total_weighted_distance'])
 
     # Merge with one of the original DataFrames to get additional details
-    # Use the first DataFrame in `dfs` to retrieve 'pos', 'age', 'squad'
-    first_df = next(iter(dfs.values()))
     combined_df = combined_df.merge(first_df[['player', 'pos', 'age', 'squad']], on='player', how='left')
 
     # Sort by total weighted distance and return the top 10
@@ -176,18 +212,19 @@ def compute_stat_group_means(dfs, player_name):
 
     for stat_name, df in dfs.items():
         if player_name not in df['player'].values:
-            st.write(f"Player '{player_name}' not found in {stat_name}. Skipping...")
-            continue
+            continue  # Skip if the player is not in this stat group
 
         # Get numerical columns
         numerical_cols = df.select_dtypes(include=np.number).columns
+
+        if numerical_cols.empty:
+            continue  # Skip if there are no numerical columns
 
         # Get the player's row
         player_row = df[df['player'] == player_name][numerical_cols]
 
         if player_row.empty:
-            st.write(f"No numerical data available for player '{player_name}' in {stat_name}. Skipping...")
-            continue
+            continue  # Skip if the player's data is missing
 
         # Compute the mean of all numerical features for all players
         group_means = df[numerical_cols].mean(axis=1)
@@ -234,7 +271,7 @@ def create_radar_chart(stat_group_means, player_name):
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 100]
+                range=[25, 100]
             )
         ),
         showlegend=True,
@@ -243,6 +280,62 @@ def create_radar_chart(stat_group_means, player_name):
 
     return fig
 
+# Define position-based weights
+def get_position_weights(selected_player, dfs):
+    """
+    Define position-based weights for each stat group based on the player's position.
+
+    Args:
+        selected_player (str): The name of the selected player.
+        dfs (dict): Dictionary of DataFrames for each stats group.
+
+    Returns:
+        dict: A dictionary of weights for each stat group.
+    """
+    # Get the player's position from the first DataFrame
+    first_df = next(iter(dfs.values()))
+    player_position = first_df[first_df['player'] == selected_player]['pos'].values[0]
+
+    # Default weights
+    weights = {
+        "standard_stats": 1.0,
+        "shooting": 1.0,
+        "passing": 1.0,
+        "pass_types": 1.0,
+        "goal_and_shot_creation": 1.0,
+        "defensive_actions": 1.0,
+        "possession": 1.0,
+        "playing_time": 1.0,
+        "miscellaneous_stats": 1.0,
+    }
+
+    # Adjust weights based on position
+    if "F" in player_position:  # Forwards
+        weights.update({
+            "shooting": 1.5,
+            "goal_and_shot_creation": 1.5,
+            "passing": 1.2,
+            "defensive_actions": 0.5,
+        })
+    elif "M" in player_position:  # Midfielders
+        weights.update({
+            "passing": 1.5,
+            "possession": 1.5,
+            "goal_and_shot_creation": 1.3,
+            "shooting": 1.0,
+            "defensive_actions": 1.0,
+        })
+    elif "D" in player_position:  # Defenders
+        weights.update({
+            "defensive_actions": 1.5,
+            "possession": 1.3,
+            "playing_time": 1.2,
+            "shooting": 0.5,
+            "goal_and_shot_creation": 0.5,
+        })
+
+    return weights
+
 # ------------------ MAIN APP ------------------
 
 def main():
@@ -250,17 +343,7 @@ def main():
     st.markdown("Find players who perform similarly across different stat categories based on PCA proximity.")
     st.markdown("---")
 
-    # Sidebar
-    st.sidebar.title("About")
-    st.sidebar.markdown("""
-    - Data Source: [FBRef](https://fbref.com/)
-    - Clustering: PCA + KMeans
-    - Stat Categories: Shooting, Passing, GCA, Defense, etc.
-    """)
-    st.sidebar.markdown("Built with ❤️ using Streamlit")
-
-    # Load and process
-    st.markdown('<p class="big-font">1. Loading Player Data</p>', unsafe_allow_html=True)
+    # Load and process data with a progress bar
     dfs = {}
     progress_text = st.empty()
     progress_bar = st.progress(0)
@@ -272,31 +355,40 @@ def main():
         dfs[key] = df
         progress_bar.progress((i + 1) / len(stat_keys))
 
-    progress_text.text("✅ All data loaded and processed.")
+    # Clear the progress bar and text after loading is complete
+    progress_text.empty()
     progress_bar.empty()
 
-    # Select player
-    st.markdown('<p class="big-font">2. Select a Player</p>', unsafe_allow_html=True)
-    all_players = set()
-    for df in dfs.values():
-        all_players.update(df['player'].dropna().unique())
+    # Define `first_df` as the first DataFrame in `dfs`
+    first_df = next(iter(dfs.values()))
 
+    # Sidebar Filters
+    st.sidebar.markdown("### Filters")
+    positions = sorted(set(first_df['pos'].dropna()))
+    competitions = sorted(set(first_df['comp'].dropna()))
+    nations = sorted(set(first_df['nation'].dropna()))
+
+    selected_positions = st.sidebar.multiselect("Filter by Position", positions, default=positions)
+    selected_competitions = st.sidebar.multiselect("Filter by Competition", competitions, default=competitions)
+    selected_nations = st.sidebar.multiselect("Filter by Nation", nations, default=nations)
+
+    # Filter the player list based on the selected filters
+    filtered_df = first_df[
+        (first_df['pos'].isin(selected_positions)) &
+        (first_df['comp'].isin(selected_competitions)) &
+        (first_df['nation'].isin(selected_nations))
+    ]
+    all_players = set(filtered_df['player'].dropna())
+
+    # Player Selection
     player_list = sorted(all_players)
     selected_player = st.selectbox("Choose a player to analyze:", player_list)
 
     # Define position-based weights
-    position_weights = {
-        "misc": 1.0,
-        "shooting": 1.5 if "F" in selected_player else 0.5,  # Higher weight for forwards
-        "passing": 1.2 if "M" in selected_player else 0.8,  # Higher weight for midfielders
-        "defense": 1.5 if "D" in selected_player else 0.5,  # Higher weight for defenders
-        "gca": 1.3 if "F" in selected_player else 0.7,      # Higher weight for forwards
-        "standard_stats": 1.0,
-    }
+    position_weights = get_position_weights(selected_player, dfs)
 
     # Show closest players
     if selected_player:
-        st.markdown('<div class="highlight-box">Analyzing player: <b>{}</b></div>'.format(selected_player), unsafe_allow_html=True)
         closest_players_per_stat, combined_df = find_closest_players_per_stat(dfs, selected_player, position_weights)
 
         # Display combined distances and radar chart side by side
