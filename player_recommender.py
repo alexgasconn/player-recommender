@@ -143,19 +143,9 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
             st.write(f"Player '{player_name}' not found in {stat_name}. Skipping...")
             continue
 
-        # Get PCA columns for this stat
-        pca_columns = [col for col in df.columns if col.startswith('pca')]
-        if not pca_columns:
-            st.write(f"No PCA data available for {stat_name}. Skipping...")
-            continue
-
-        # Get the player's PCA row
-        player_row = df[df['player'] == player_name][pca_columns]
-        if player_row.empty:
-            st.write(f"No PCA data available for player '{player_name}' in {stat_name}. Skipping...")
-            continue
-
         # Compute distances
+        pca_columns = [col for col in df.columns if col.startswith('pca')]
+        player_row = df[df['player'] == player_name][pca_columns]
         distances = cdist(player_row, df[pca_columns], metric='euclidean').flatten()
         df['distance'] = distances
 
@@ -177,9 +167,14 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
         df['position_bonus'] = df['pos'].apply(position_bonus)
         df['final_distance'] = df['weighted_distance'] + df['position_bonus']
 
+        # Calculate similarity (0-100%)
+        min_distance = df['final_distance'].min()
+        max_distance = df['final_distance'].max()
+        df['similarity'] = 100 * (1 - ((df['final_distance'] - min_distance) / (max_distance - min_distance)))
+
         # Get the top 10 closest players
         closest_players = df[df['player'] != player_name].sort_values(by='final_distance').head(10)
-        closest_players_per_stat[stat_name] = closest_players[['player', 'pos', 'age', 'squad', 'final_distance']]
+        closest_players_per_stat[stat_name] = closest_players[['player', 'pos', 'age', 'squad', 'final_distance', 'similarity']]
 
         # Add weighted distances to the combined distances
         for _, row in closest_players.iterrows():
@@ -191,6 +186,11 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
 
     # Merge with one of the original DataFrames to get additional details
     combined_df = combined_df.merge(first_df[['player', 'pos', 'age', 'squad']], on='player', how='left')
+
+    # Calculate similarity for the combined distances
+    min_combined_distance = combined_df['total_weighted_distance'].min()
+    max_combined_distance = combined_df['total_weighted_distance'].max()
+    combined_df['similarity'] = 100 * (1 - ((combined_df['total_weighted_distance'] - min_combined_distance) / (max_combined_distance - min_combined_distance)))
 
     # Sort by total weighted distance and return the top 10
     combined_df = combined_df.sort_values(by='total_weighted_distance').head(10)
@@ -240,13 +240,14 @@ def compute_stat_group_means(dfs, player_name):
     return stat_group_means
 
 
-def create_radar_chart(stat_group_means, player_name):
+def create_radar_chart(stat_group_means, player_name, comparison_stats=None):
     """
-    Create a radar chart for the selected player's stats group means.
+    Create a radar chart for the selected player's stats group means and compare with other players.
 
     Args:
-        stat_group_means (dict): A dictionary of scaled means for each stats group.
-        player_name (str): The name of the player to analyze.
+        stat_group_means (dict): A dictionary of scaled means for each stats group for the main player.
+        player_name (str): The name of the main player to analyze.
+        comparison_stats (dict): A dictionary where keys are player names and values are their stats group means.
 
     Returns:
         plotly.graph_objects.Figure: A radar chart figure.
@@ -260,6 +261,7 @@ def create_radar_chart(stat_group_means, player_name):
 
     fig = go.Figure()
 
+    # Add the main player's stats to the radar chart
     fig.add_trace(go.Scatterpolar(
         r=values,
         theta=categories,
@@ -267,15 +269,27 @@ def create_radar_chart(stat_group_means, player_name):
         name=player_name
     ))
 
+    # Add comparison players' stats to the radar chart
+    if comparison_stats:
+        for comp_player, comp_stats in comparison_stats.items():
+            comp_values = list(comp_stats.values())
+            comp_values.append(comp_values[0])  # Close the radar chart
+            fig.add_trace(go.Scatterpolar(
+                r=comp_values,
+                theta=categories,
+                fill='none',  # No fill for comparison players
+                name=comp_player
+            ))
+
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[25, 100]
+                range=[0, 100]  # Adjust range as needed
             )
         ),
         showlegend=True,
-        title=f"Radar Chart for {player_name}"
+        title=f"Radar Chart for {player_name} and Comparisons"
     )
 
     return fig
@@ -396,10 +410,28 @@ def main():
         with col1:
             st.markdown('<p class="stat-title">🏆 Most Similar Players Overall</p>', unsafe_allow_html=True)
             st.dataframe(combined_df, use_container_width=True)
+
+        # Move the player comparison selector above the radar chart logic
+        st.markdown('<p class="stat-title">🔄 Compare with Other Players</p>', unsafe_allow_html=True)
+        top_10_players = combined_df['player'].tolist()
+        selected_comparison_players = st.multiselect(
+            "Select players to compare:",
+            options=top_10_players,
+            default=[],
+            help="Select one or more players to compare their statistics on the radar chart."
+        )
+
         with col2:
             st.markdown('<p class="stat-title">📊 Radar Chart</p>', unsafe_allow_html=True)
             stat_group_means = compute_stat_group_means(dfs, selected_player)
-            radar_chart = create_radar_chart(stat_group_means, selected_player)
+
+            # Fetch statistics for selected comparison players
+            comparison_stats = {}
+            for player in selected_comparison_players:
+                comparison_stats[player] = compute_stat_group_means(dfs, player)
+
+            # Create radar chart with comparisons
+            radar_chart = create_radar_chart(stat_group_means, selected_player, comparison_stats)
             st.plotly_chart(radar_chart, use_container_width=True)
 
         # Toggle visibility of distance tables for each stat group
