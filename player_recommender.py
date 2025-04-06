@@ -11,7 +11,6 @@ import streamlit as st
 import plotly.graph_objects as go
 # Suppress warnings
 import warnings
-import seaborn as sns
 warnings.filterwarnings("ignore")
 
 # ------------------ PAGE CONFIG ------------------
