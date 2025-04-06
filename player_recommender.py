@@ -6,11 +6,9 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-from functools import reduce
 from scipy.spatial.distance import cdist
 import streamlit as st
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
 # Suppress warnings
 import warnings
 import seaborn as sns
