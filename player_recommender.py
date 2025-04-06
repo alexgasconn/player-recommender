@@ -10,9 +10,10 @@ from functools import reduce
 from scipy.spatial.distance import cdist
 import streamlit as st
 import plotly.graph_objects as go
-
+import matplotlib.pyplot as plt
 # Suppress warnings
 import warnings
+import seaborn as sns
 warnings.filterwarnings("ignore")
 
 # ------------------ PAGE CONFIG ------------------
@@ -70,7 +71,7 @@ stat_keys = [
 
 # ------------------ DATA PROCESSING ------------------
 
-@st.cache_data
+@st.cache_resource
 def load_and_process(url_key):
     """
     Load and process data for a given stats group.
@@ -97,6 +98,9 @@ def load_and_process(url_key):
     # Drop columns that are completely empty
     df.dropna(axis=1, how='all', inplace=True)
 
+    #delete rows with > 0 in 90s
+    # df = df[df['90s'] > df['90s']]
+
     # Standardize numerical columns
     scaler = StandardScaler()
     numerical_cols = df.select_dtypes(include=np.number).columns
@@ -104,19 +108,25 @@ def load_and_process(url_key):
 
     return df
 
-def apply_pca_kmeans(df, name):
+
+@st.cache_resource
+def apply_pca_kmeans(df: pd.DataFrame, name: str):
     df_numerical = df.select_dtypes(include=np.number)
+
+    # PCA
     pca = PCA(n_components=2)
     df_pca = pca.fit_transform(df_numerical)
 
     df[f'pca1_{name}'] = df_pca[:, 0]
     df[f'pca2_{name}'] = df_pca[:, 1]
 
+    # KMeans
     kmeans = KMeans(n_clusters=10, random_state=42, n_init=10)
     kmeans.fit(df_pca)
     df[f'cluster_{name}'] = kmeans.labels_
 
     return df
+
 
 def find_closest_players_per_stat(dfs, player_name, position_weights):
     """
@@ -191,6 +201,10 @@ def find_closest_players_per_stat(dfs, player_name, position_weights):
     min_combined_distance = combined_df['total_weighted_distance'].min()
     max_combined_distance = combined_df['total_weighted_distance'].max()
     combined_df['similarity'] = 100 * (1 - ((combined_df['total_weighted_distance'] - min_combined_distance) / (max_combined_distance - min_combined_distance)))
+    
+    combined_df['total_weighted_distance'] = combined_df['total_weighted_distance'].clip(0, combined_df['total_weighted_distance'].max())  # Ensure similarity is between 0 and 100
+    combined_df['similarity'] = (combined_df['similarity'] * (1-abs(combined_df['total_weighted_distance'])))
+    combined_df['similarity'] = combined_df['similarity'].apply(lambda x: f"{x:.2f}%")
 
     # Sort by total weighted distance and return the top 10
     combined_df = combined_df.sort_values(by='total_weighted_distance').head(10)
@@ -350,6 +364,17 @@ def get_position_weights(selected_player, dfs):
 
     return weights
 
+
+@st.cache_resource
+def load_all_stat_dfs():
+    dfs = {}
+    for i, key in enumerate(stat_keys):
+        df = load_and_process(key)
+        df = apply_pca_kmeans(df, key)
+        dfs[key] = df
+    return dfs
+
+
 # ------------------ MAIN APP ------------------
 
 def main():
@@ -357,23 +382,10 @@ def main():
     st.markdown("Find players who perform similarly across different stat categories based on PCA proximity.")
     st.markdown("---")
 
-    # Load and process data with a progress bar
-    dfs = {}
-    progress_text = st.empty()
-    progress_bar = st.progress(0)
-
-    for i, key in enumerate(stat_keys):
-        progress_text.text(f"Loading and processing: {key}")
-        df = load_and_process(key)
-        df = apply_pca_kmeans(df, key)
-        dfs[key] = df
-        progress_bar.progress((i + 1) / len(stat_keys))
-
-    # Clear the progress bar and text after loading is complete
-    progress_text.empty()
-    progress_bar.empty()
-
-    # Define `first_df` as the first DataFrame in `dfs`
+    # Mostrar barra de carga solo en la primera ejecución (opcional)
+    with st.spinner("Loading player data and computing PCA + Clustering..."):
+        dfs = load_all_stat_dfs()
+    
     first_df = next(iter(dfs.values()))
 
     # Sidebar Filters
@@ -408,10 +420,11 @@ def main():
         # Display combined distances and radar chart side by side
         col1, col2 = st.columns(2)
         with col1:
+            show_columns = ['player', 'pos', 'age', 'squad', 'similarity']
             st.markdown('<p class="stat-title">🏆 Most Similar Players Overall</p>', unsafe_allow_html=True)
-            st.dataframe(combined_df, use_container_width=True)
+            st.dataframe(combined_df[show_columns], use_container_width=True)
 
-        # Move the player comparison selector above the radar chart logic
+        # Compare with other players
         st.markdown('<p class="stat-title">🔄 Compare with Other Players</p>', unsafe_allow_html=True)
         top_10_players = combined_df['player'].tolist()
         selected_comparison_players = st.multiselect(
@@ -425,21 +438,18 @@ def main():
             st.markdown('<p class="stat-title">📊 Radar Chart</p>', unsafe_allow_html=True)
             stat_group_means = compute_stat_group_means(dfs, selected_player)
 
-            # Fetch statistics for selected comparison players
             comparison_stats = {}
             for player in selected_comparison_players:
                 comparison_stats[player] = compute_stat_group_means(dfs, player)
 
-            # Create radar chart with comparisons
             radar_chart = create_radar_chart(stat_group_means, selected_player, comparison_stats)
             st.plotly_chart(radar_chart, use_container_width=True)
 
-        # Toggle visibility of distance tables for each stat group
+        # Expandable stat-by-stat similarity
         for stat_name, closest_players in closest_players_per_stat.items():
             if st.checkbox(f"Show closest players in {stat_name.title()}", key=stat_name):
                 st.markdown(f'<p class="stat-title">🔎 Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
                 st.dataframe(closest_players, use_container_width=True)
-
 
 if __name__ == "__main__":
     main()
