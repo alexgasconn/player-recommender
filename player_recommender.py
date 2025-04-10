@@ -95,6 +95,8 @@ def load_and_process(url_key):
     # Drop columns that are completely empty
     df.dropna(axis=1, how='all', inplace=True)
 
+    df['pos'] = df['pos'].str.split(',').str[0]  # Keep only the first position if multiple
+
     #delete rows with > 0 in 90s
     # df = df[df['90s'] > df['90s']]
 
