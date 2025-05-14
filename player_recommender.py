@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 from config import urls, stat_keys, custom_styles
 from data_utils import load_all_stat_dfs
@@ -24,6 +23,13 @@ def main():
 
     with st.spinner("Loading player data and computing PCA + Clustering..."):
         dfs = load_all_stat_dfs()
+        # Filtrar jugadores con al menos el 25% del promedio general de '90s'
+        general_90s = next(iter(dfs.values()))['90s'].mean()
+        threshold_90s = general_90s * 0.25
+        dfs = {
+            key: df[df['90s'] >= threshold_90s] if '90s' in df.columns else df
+            for key, df in dfs.items()
+        }
 
     first_df = next(iter(dfs.values()))
 

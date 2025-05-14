@@ -32,7 +32,7 @@ def create_radar_chart(stat_group_means, player_name, comparison_stats=None):
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 100]
+                range=[40, 100]
             )
         ),
         showlegend=True,
