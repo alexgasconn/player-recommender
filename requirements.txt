@@ -5,4 +5,6 @@ streamlit
 plotly
 beautifulsoup4
 lxml
+types
+requests
 

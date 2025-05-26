@@ -7,6 +7,7 @@ from analysis import (
     get_position_weights
 )
 from visuals import create_radar_chart
+import types
 
 st.set_page_config(
     page_title="FBRef Player Recommender",
@@ -89,3 +90,36 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Add radar chart for closest players in each stat group
+    # This code should be placed after the main() function
+
+        # Helper to get stat group means for a list of players
+    def get_stat_group_means_for_players(dfs, players, stat_group):
+        return {
+            player: compute_stat_group_means(dfs, player, stat_group=stat_group)
+            for player in players
+        }
+
+    # Patch main to add radar chart for each stat group
+
+    def main_with_stat_group_radar():
+        main()
+        # Access Streamlit session state to get selected player
+        if "Choose a player to analyze:" in st.session_state:
+            selected_player = st.session_state["Choose a player to analyze:"]
+            if selected_player:
+                dfs = load_all_stat_dfs()
+                position_weights = get_position_weights(selected_player, dfs)
+                closest_players_per_stat, _ = find_closest_players_per_stat(dfs, selected_player, position_weights)
+                for stat_name, closest_players in closest_players_per_stat.items():
+                    if st.session_state.get(stat_name, False):
+                        # Get top 3 closest players for radar chart
+                        top_players = closest_players['player'].head(3).tolist()
+                        stat_group_means = compute_stat_group_means(dfs, selected_player, stat_group=stat_name)
+                        comparison_stats = get_stat_group_means_for_players(dfs, top_players, stat_group=stat_name)
+                        radar_chart = create_radar_chart(stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
+                        st.plotly_chart(radar_chart, use_container_width=True)
+
+    main_with_stat_group_radar = types.FunctionType(main_with_stat_group_radar.__code__, globals())
+    if __name__ == "__main__":
+        main_with_stat_group_radar()
