@@ -56,7 +56,17 @@ def main():
     all_players = set(filtered_df['player'].dropna())
 
     player_list = sorted(all_players)
-    selected_player = st.selectbox("Choose a player to analyze:", player_list)
+    col_player, col_compare = st.columns([2, 3])
+    with col_player:
+        selected_player = st.selectbox(
+            "Choose a player to analyze:", player_list)
+    with col_compare:
+        selected_comparison_players = st.multiselect(
+            "Select players to compare:",
+            options=player_list,
+            default=[],
+            help="Select one or more players to compare their statistics on the radar chart."
+        )
 
     if selected_player:
         position_weights = get_position_weights(selected_player, dfs)
@@ -73,12 +83,6 @@ def main():
         st.markdown(
             '<p class="stat-title">Compare with Other Players</p>', unsafe_allow_html=True)
         top_10_players = combined_df['player'].tolist()
-        selected_comparison_players = st.multiselect(
-            "Select players to compare:",
-            options=top_10_players,
-            default=[],
-            help="Select one or more players to compare their statistics on the radar chart."
-        )
 
         with col2:
             st.markdown('<p class="stat-title">Radar Chart</p>',
