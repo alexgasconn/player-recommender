@@ -17,9 +17,11 @@ st.set_page_config(
 
 st.markdown(custom_styles, unsafe_allow_html=True)
 
+
 def main():
     st.title("FBRef Player Recommender System")
-    st.markdown("Find players who perform similarly across different stat categories based on PCA proximity.")
+    st.markdown(
+        "Find players who perform similarly across different stat categories based on PCA proximity.")
     st.markdown("---")
 
     with st.spinner("Loading player data and computing PCA + Clustering..."):
@@ -39,10 +41,12 @@ def main():
     competitions = sorted(set(first_df['comp'].dropna()))
     nations = sorted(set(first_df['nation'].dropna()))
 
-    selected_positions = st.sidebar.multiselect("Filter by Position", positions, default=positions, key="filter_pos")
-    selected_competitions = st.sidebar.multiselect("Filter by Competition", competitions, default=competitions, key="filter_comp")
-    selected_nations = st.sidebar.multiselect("Filter by Nation", nations, default=nations, key="filter_nat")
-
+    selected_positions = st.sidebar.multiselect(
+        "Filter by Position", positions, default=positions, key="filter_pos")
+    selected_competitions = st.sidebar.multiselect(
+        "Filter by Competition", competitions, default=competitions, key="filter_comp")
+    selected_nations = st.sidebar.multiselect(
+        "Filter by Nation", nations, default=nations, key="filter_nat")
 
     filtered_df = first_df[
         (first_df['pos'].isin(selected_positions)) &
@@ -56,15 +60,18 @@ def main():
 
     if selected_player:
         position_weights = get_position_weights(selected_player, dfs)
-        closest_players_per_stat, combined_df = find_closest_players_per_stat(dfs, selected_player, position_weights)
+        closest_players_per_stat, combined_df = find_closest_players_per_stat(
+            dfs, selected_player, position_weights)
 
         col1, col2 = st.columns(2)
         with col1:
             show_columns = ['player', 'pos', 'age', 'squad', 'similarity']
-            st.markdown('<p class="stat-title">Most Similar Players Overall</p>', unsafe_allow_html=True)
+            st.markdown(
+                '<p class="stat-title">Most Similar Players Overall</p>', unsafe_allow_html=True)
             st.dataframe(combined_df[show_columns], use_container_width=True)
 
-        st.markdown('<p class="stat-title">Compare with Other Players</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="stat-title">Compare with Other Players</p>', unsafe_allow_html=True)
         top_10_players = combined_df['player'].tolist()
         selected_comparison_players = st.multiselect(
             "Select players to compare:",
@@ -74,25 +81,34 @@ def main():
         )
 
         with col2:
-            st.markdown('<p class="stat-title">Radar Chart</p>', unsafe_allow_html=True)
+            st.markdown('<p class="stat-title">Radar Chart</p>',
+                        unsafe_allow_html=True)
             stat_group_means = compute_stat_group_means(dfs, selected_player)
 
             comparison_stats = {}
             for player in selected_comparison_players:
-                comparison_stats[player] = compute_stat_group_means(dfs, player)
+                comparison_stats[player] = compute_stat_group_means(
+                    dfs, player)
 
-            radar_chart = create_radar_chart(stat_group_means, selected_player, comparison_stats)
+            radar_chart = create_radar_chart(
+                stat_group_means, selected_player, comparison_stats)
             st.plotly_chart(radar_chart, use_container_width=True)
 
-        for stat_name, closest_players in closest_players_per_stat.items():
-            if st.checkbox(f"Show closest players in {stat_name.title()}", key=stat_name):
-                st.markdown(f'<p class="stat-title">Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
-                st.dataframe(closest_players, use_container_width=True)
-
-    # Add radar chart for closest players in each stat group
-    # This code should be placed after the main() function
+        # Use tabs for closest players per stat group
+        stat_names = list(closest_players_per_stat.keys())
+        if stat_names:
+            tab_objs = st.tabs(
+                [f"{stat_name.title()}" for stat_name in stat_names])
+            for tab, stat_name in zip(tab_objs, stat_names):
+                with tab:
+                    st.markdown(
+                        f'<p class="stat-title">Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
+                    st.dataframe(
+                        closest_players_per_stat[stat_name], use_container_width=True)
 
     # Helper to get stat group means for a list of players
+
+
 def get_stat_group_means_for_players(dfs, players, stat_group):
     return {
         player: compute_stat_group_means(dfs, player, stat_group=stat_group)
@@ -100,6 +116,7 @@ def get_stat_group_means_for_players(dfs, players, stat_group):
     }
 
 # Patch main to add radar chart for each stat group
+
 
 def main_with_stat_group_radar():
     main()
@@ -109,17 +126,28 @@ def main_with_stat_group_radar():
         if selected_player:
             dfs = load_all_stat_dfs()
             position_weights = get_position_weights(selected_player, dfs)
-            closest_players_per_stat, _ = find_closest_players_per_stat(dfs, selected_player, position_weights)
-            for stat_name, closest_players in closest_players_per_stat.items():
-                if st.session_state.get(stat_name, False):
-                    # Get top 3 closest players for radar chart
-                    top_players = closest_players['player'].head(3).tolist()
-                    stat_group_means = compute_stat_group_means(dfs, selected_player, stat_group=stat_name)
-                    comparison_stats = get_stat_group_means_for_players(dfs, top_players, stat_group=stat_name)
-                    radar_chart = create_radar_chart(stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
-                    st.plotly_chart(radar_chart, use_container_width=True)
+            closest_players_per_stat, _ = find_closest_players_per_stat(
+                dfs, selected_player, position_weights)
+            stat_names = list(closest_players_per_stat.keys())
+            if stat_names:
+                tab_objs = st.tabs(
+                    [f"Radar: {stat_name.title()}" for stat_name in stat_names])
+                for tab, stat_name in zip(tab_objs, stat_names):
+                    with tab:
+                        # Get top 3 closest players for radar chart
+                        top_players = closest_players_per_stat[stat_name]['player'].head(
+                            3).tolist()
+                        stat_group_means = compute_stat_group_means(
+                            dfs, selected_player, stat_group=stat_name)
+                        comparison_stats = get_stat_group_means_for_players(
+                            dfs, top_players, stat_group=stat_name)
+                        radar_chart = create_radar_chart(
+                            stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
+                        st.plotly_chart(radar_chart, use_container_width=True)
 
-main_with_stat_group_radar = types.FunctionType(main_with_stat_group_radar.__code__, globals())
+
+main_with_stat_group_radar = types.FunctionType(
+    main_with_stat_group_radar.__code__, globals())
 
 if __name__ == "__main__":
     main_with_stat_group_radar()
