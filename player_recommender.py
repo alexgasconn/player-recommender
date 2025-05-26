@@ -107,8 +107,21 @@ def main():
                 with tab:
                     st.markdown(
                         f'<p class="stat-title">Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
-                    st.dataframe(
-                        closest_players_per_stat[stat_name], use_container_width=True)
+                    col_tab1, col_tab2 = st.columns(2)
+                    with col_tab1:
+                        st.dataframe(
+                            closest_players_per_stat[stat_name], use_container_width=True)
+                    with col_tab2:
+                        # Get top 3 closest players for radar chart
+                        top_players = closest_players_per_stat[stat_name]['player'].head(
+                            3).tolist()
+                        stat_group_means = compute_stat_group_means(
+                            dfs, selected_player, stat_group=stat_name)
+                        comparison_stats = get_stat_group_means_for_players(
+                            dfs, top_players, stat_group=stat_name)
+                        radar_chart = create_radar_chart(
+                            stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
+                        st.plotly_chart(radar_chart, use_container_width=True)
 
     # Helper to get stat group means for a list of players
 
