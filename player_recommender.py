@@ -39,9 +39,10 @@ def main():
     competitions = sorted(set(first_df['comp'].dropna()))
     nations = sorted(set(first_df['nation'].dropna()))
 
-    selected_positions = st.sidebar.multiselect("Filter by Position", positions, default=positions)
-    selected_competitions = st.sidebar.multiselect("Filter by Competition", competitions, default=competitions)
-    selected_nations = st.sidebar.multiselect("Filter by Nation", nations, default=nations)
+    selected_positions = st.sidebar.multiselect("Filter by Position", positions, default=positions, key="filter_pos")
+    selected_competitions = st.sidebar.multiselect("Filter by Competition", competitions, default=competitions, key="filter_comp")
+    selected_nations = st.sidebar.multiselect("Filter by Nation", nations, default=nations, key="filter_nat")
+
 
     filtered_df = first_df[
         (first_df['pos'].isin(selected_positions)) &
@@ -88,8 +89,6 @@ def main():
                 st.markdown(f'<p class="stat-title">Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
                 st.dataframe(closest_players, use_container_width=True)
 
-if __name__ == "__main__":
-    main_with_stat_group_radar()
     # Add radar chart for closest players in each stat group
     # This code should be placed after the main() function
 
