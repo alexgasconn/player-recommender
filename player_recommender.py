@@ -89,7 +89,7 @@ def main():
                 st.dataframe(closest_players, use_container_width=True)
 
 if __name__ == "__main__":
-    main()
+    main_with_stat_group_radar()
     # Add radar chart for closest players in each stat group
     # This code should be placed after the main() function
 
