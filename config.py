@@ -19,20 +19,57 @@ stat_keys = list(urls.keys())
 # Estilos CSS para Streamlit
 custom_styles = """
 <style>
-.big-font { font-size:24px !important; font-weight: bold; }
-.sub-font { font-size:18px !important; }
-.stat-title { font-size:20px !important; font-weight:bold; color: #4CAF50; margin-top: 2em; }
-.highlight-box {
-    background-color: #f0f9ff;
-    padding: 1em;
-    border-radius: 10px;
-    border-left: 4px solid #2e86de;
-    margin-bottom: 1em;
+:root {
+    --bg-soft: #f6f8fa;
+    --panel-border: #d0d7de;
+    --accent: #0f766e;
+    --accent-soft: #e6fffa;
 }
-.centered {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+
+.main .block-container {
+    padding-top: 1.5rem;
+}
+
+.stApp {
+    background: radial-gradient(circle at top right, #ffffff 0%, var(--bg-soft) 75%);
+}
+
+.stat-title {
+    font-size: 1.05rem !important;
+    font-weight: 700;
+    color: var(--accent);
+    margin-top: 0.75rem;
+    margin-bottom: 0.35rem;
+}
+
+div[data-testid="stMetric"] {
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 0.5rem 0.75rem;
+}
+
+div[data-testid="stDataFrame"] {
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.5rem;
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    padding: 0.35rem 0.8rem;
+    background: #ffffff;
+}
+
+.stTabs [aria-selected="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #0b4f49;
 }
 </style>
 """

@@ -1,5 +1,5 @@
 import streamlit as st
-from config import urls, stat_keys, custom_styles
+from config import custom_styles
 from data_utils import load_all_stat_dfs
 from analysis import (
     find_closest_players_per_stat,
@@ -7,32 +7,28 @@ from analysis import (
     get_position_weights
 )
 from visuals import create_radar_chart
-import types
 
 st.set_page_config(
     page_title="FBRef Player Recommender",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 st.markdown(custom_styles, unsafe_allow_html=True)
 
 
 def main():
-    st.title("FBRef Player Recommender System")
+    st.title("FBRef Player Recommender")
     st.markdown(
-        "Find players who perform similarly across different stat categories based on PCA proximity.")
+        "Player discovery with multi-stat similarity, position-aware weighting, and interactive scouting filters."
+    )
+    st.caption(
+        "Data source: FBRef Big-5 public tables. Similarity uses PCA space per stat group and weighted distance aggregation."
+    )
     st.markdown("---")
 
     with st.spinner("Loading player data and computing PCA + Clustering..."):
         dfs = load_all_stat_dfs()
-        # Filtrar jugadores con al menos el 25% del promedio general de '90s'
-        general_90s = next(iter(dfs.values()))['90s'].mean()
-        threshold_90s = general_90s * 0.25
-        dfs = {
-            key: df[df['90s'] >= threshold_90s] if '90s' in df.columns else df
-            for key, df in dfs.items()
-        }
 
     first_df = next(iter(dfs.values()))
 
@@ -41,18 +37,53 @@ def main():
     competitions = sorted(set(first_df['comp'].dropna()))
     nations = sorted(set(first_df['nation'].dropna()))
 
+    age_min = int(first_df['age_year'].min()
+                  ) if 'age_year' in first_df.columns else 16
+    age_max = int(first_df['age_year'].max()
+                  ) if 'age_year' in first_df.columns else 40
+    raw_90s_max = float(first_df['raw_90s'].max()
+                        ) if 'raw_90s' in first_df.columns else 50.0
+
     selected_positions = st.sidebar.multiselect(
         "Filter by Position", positions, default=positions, key="filter_pos")
     selected_competitions = st.sidebar.multiselect(
         "Filter by Competition", competitions, default=competitions, key="filter_comp")
     selected_nations = st.sidebar.multiselect(
         "Filter by Nation", nations, default=nations, key="filter_nat")
+    selected_age = st.sidebar.slider(
+        "Age Range",
+        min_value=age_min,
+        max_value=age_max,
+        value=(age_min, age_max),
+    )
+    min_90s = st.sidebar.slider(
+        "Minimum 90s Played",
+        min_value=0.0,
+        max_value=raw_90s_max,
+        value=min(5.0, raw_90s_max),
+        step=0.5,
+    )
+    same_position_only = st.sidebar.checkbox(
+        "Only same main position",
+        value=False,
+    )
+    top_k = st.sidebar.slider(
+        "Number of recommendations", min_value=5, max_value=20, value=10, step=1)
 
     filtered_df = first_df[
         (first_df['pos'].isin(selected_positions)) &
         (first_df['comp'].isin(selected_competitions)) &
-        (first_df['nation'].isin(selected_nations))
+        (first_df['nation'].isin(selected_nations)) &
+        (first_df['age_year'].between(selected_age[0], selected_age[1]) if 'age_year' in first_df.columns else True) &
+        ((first_df['raw_90s'] >= min_90s)
+         if 'raw_90s' in first_df.columns else True)
     ]
+
+    if filtered_df.empty:
+        st.warning(
+            "No players match the current filters. Relax at least one filter in the sidebar.")
+        return
+
     all_players = set(filtered_df['player'].dropna())
 
     player_list = sorted(all_players)
@@ -63,7 +94,7 @@ def main():
     with col_compare:
         selected_comparison_players = st.multiselect(
             "Select players to compare:",
-            options=player_list,
+            options=[p for p in player_list if p != selected_player],
             default=[],
             help="Select one or more players to compare their statistics on the radar chart."
         )
@@ -71,100 +102,90 @@ def main():
     if selected_player:
         position_weights = get_position_weights(selected_player, dfs)
         closest_players_per_stat, combined_df = find_closest_players_per_stat(
-            dfs, selected_player, position_weights)
+            dfs,
+            selected_player,
+            position_weights,
+            candidate_players=all_players,
+            top_k=top_k,
+            same_position_only=same_position_only,
+        )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            show_columns = ['player', 'pos', 'age', 'squad', 'similarity']
+        if combined_df.empty:
+            st.error(
+                "No recommendations available for this player with the current filters.")
+            return
+
+        top_recommended = combined_df['player'].tolist()
+
+        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1.metric("Candidate Pool", len(player_list))
+        kpi2.metric("Recommended Players", len(combined_df))
+        kpi3.metric("Stat Groups Used", len(closest_players_per_stat))
+
+        tab_overview, tab_by_group, tab_radar = st.tabs(
+            ["Overview", "By Stat Group", "Radar Compare"])
+
+        with tab_overview:
             st.markdown(
-                '<p class="stat-title">Most Similar Players Overall</p>', unsafe_allow_html=True)
-            st.dataframe(combined_df[show_columns], use_container_width=True)
+                '<p class="stat-title">Most Similar Players (Overall)</p>', unsafe_allow_html=True)
+            display_df = combined_df.copy()
+            display_df['similarity'] = display_df['similarity'].map(
+                lambda x: f"{x:.2f}%")
+            st.dataframe(
+                display_df[['player', 'pos', 'age',
+                            'squad', 'similarity', 'avg_distance']],
+                use_container_width=True,
+                hide_index=True,
+            )
 
-        st.markdown(
-            '<p class="stat-title">Compare with Other Players</p>', unsafe_allow_html=True)
-        top_10_players = combined_df['player'].tolist()
+        with tab_by_group:
+            stat_names = list(closest_players_per_stat.keys())
+            if not stat_names:
+                st.info(
+                    "No stat-group recommendations available for the current selection.")
+            else:
+                selected_stat = st.selectbox(
+                    "Stat group",
+                    stat_names,
+                    format_func=lambda x: x.replace("_", " ").title(),
+                )
+                st.dataframe(
+                    closest_players_per_stat[selected_stat],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
-        with col2:
-            st.markdown('<p class="stat-title">Radar Chart</p>',
-                        unsafe_allow_html=True)
-            stat_group_means = compute_stat_group_means(dfs, selected_player)
-
-            comparison_stats = {}
-            for player in selected_comparison_players:
-                comparison_stats[player] = compute_stat_group_means(
-                    dfs, player)
-
+        with tab_radar:
+            base_stats = compute_stat_group_means(dfs, selected_player)
+            comparison_pool = selected_comparison_players or top_recommended[:3]
+            comparison_stats = get_stat_group_means_for_players(
+                dfs, comparison_pool)
             radar_chart = create_radar_chart(
-                stat_group_means, selected_player, comparison_stats)
+                base_stats, selected_player, comparison_stats)
             st.plotly_chart(radar_chart, use_container_width=True)
 
-        # Use tabs for closest players per stat group
-        stat_names = list(closest_players_per_stat.keys())
-        if stat_names:
-            tab_objs = st.tabs(
-                [f"{stat_name.title()}" for stat_name in stat_names])
-            for tab, stat_name in zip(tab_objs, stat_names):
-                with tab:
-                    st.markdown(
-                        f'<p class="stat-title">Closest Players in {stat_name.title()}</p>', unsafe_allow_html=True)
-                    col_tab1, col_tab2 = st.columns(2)
-                    with col_tab1:
-                        st.dataframe(
-                            closest_players_per_stat[stat_name], use_container_width=True)
-                    with col_tab2:
-                        # Get top 3 closest players for radar chart
-                        top_players = closest_players_per_stat[stat_name]['player'].head(
-                            3).tolist()
-                        stat_group_means = compute_stat_group_means(
-                            dfs, selected_player, stat_group=stat_name)
-                        comparison_stats = get_stat_group_means_for_players(
-                            dfs, top_players, stat_group=stat_name)
-                        radar_chart = create_radar_chart(
-                            stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
-                        st.plotly_chart(radar_chart, use_container_width=True)
+            st.caption(
+                "Radar values represent average percentile per stat group (0-100). "
+                "If no comparison players are selected, the top-3 recommendations are used by default."
+            )
 
-    # Helper to get stat group means for a list of players
+        with st.expander("How similarity works"):
+            st.markdown(
+                """
+                - Each stat group is projected to PCA space.
+                - Distances are computed in that space and weighted by role-specific importance.
+                - A position compatibility factor penalizes distant roles.
+                - Overall ranking uses average weighted distance across available stat groups.
+                """
+            )
 
 
-def get_stat_group_means_for_players(dfs, players, stat_group):
+def get_stat_group_means_for_players(dfs, players, stat_group=None):
     return {
         player: compute_stat_group_means(dfs, player, stat_group=stat_group)
         for player in players
     }
 
-# Patch main to add radar chart for each stat group
-
-
-def main_with_stat_group_radar():
-    main()
-    # Access Streamlit session state to get selected player
-    if "Choose a player to analyze:" in st.session_state:
-        selected_player = st.session_state["Choose a player to analyze:"]
-        if selected_player:
-            dfs = load_all_stat_dfs()
-            position_weights = get_position_weights(selected_player, dfs)
-            closest_players_per_stat, _ = find_closest_players_per_stat(
-                dfs, selected_player, position_weights)
-            stat_names = list(closest_players_per_stat.keys())
-            if stat_names:
-                tab_objs = st.tabs(
-                    [f"Radar: {stat_name.title()}" for stat_name in stat_names])
-                for tab, stat_name in zip(tab_objs, stat_names):
-                    with tab:
-                        # Get top 3 closest players for radar chart
-                        top_players = closest_players_per_stat[stat_name]['player'].head(
-                            3).tolist()
-                        stat_group_means = compute_stat_group_means(
-                            dfs, selected_player, stat_group=stat_name)
-                        comparison_stats = get_stat_group_means_for_players(
-                            dfs, top_players, stat_group=stat_name)
-                        radar_chart = create_radar_chart(
-                            stat_group_means, selected_player, comparison_stats, stat_group=stat_name)
-                        st.plotly_chart(radar_chart, use_container_width=True)
-
-
-main_with_stat_group_radar = types.FunctionType(
-    main_with_stat_group_radar.__code__, globals())
 
 if __name__ == "__main__":
-    main_with_stat_group_radar()
+    main()
