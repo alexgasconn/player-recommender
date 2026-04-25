@@ -67,6 +67,17 @@ def main():
         "Only same main position",
         value=False,
     )
+    quality_mode = st.sidebar.selectbox(
+        "Recommendation quality profile",
+        options=["balanced", "strict", "exploratory"],
+        index=0,
+        help="Strict penalizes age/minutes mismatch more. Exploratory allows broader profile discovery.",
+    )
+    prefer_same_comp = st.sidebar.checkbox(
+        "Prioritize same competition",
+        value=True,
+        help="Adds a small bonus to players from the same competition as the selected player.",
+    )
     top_k = st.sidebar.slider(
         "Number of recommendations", min_value=5, max_value=20, value=10, step=1)
 
@@ -108,6 +119,8 @@ def main():
             candidate_players=all_players,
             top_k=top_k,
             same_position_only=same_position_only,
+            quality_mode=quality_mode,
+            prefer_same_comp=prefer_same_comp,
         )
 
         if combined_df.empty:
@@ -132,8 +145,17 @@ def main():
             display_df['similarity'] = display_df['similarity'].map(
                 lambda x: f"{x:.2f}%")
             st.dataframe(
-                display_df[['player', 'pos', 'age',
-                            'squad', 'similarity', 'avg_distance']],
+                display_df[[
+                    'player',
+                    'pos',
+                    'age',
+                    'squad',
+                    'comp',
+                    'similarity',
+                    'confidence',
+                    'groups_covered',
+                    'coverage_pct',
+                ]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -156,10 +178,11 @@ def main():
                 )
 
         with tab_radar:
-            base_stats = compute_stat_group_means(dfs, selected_player)
+            base_stats = compute_stat_group_means(
+                dfs, selected_player, reference_players=all_players)
             comparison_pool = selected_comparison_players or top_recommended[:3]
             comparison_stats = get_stat_group_means_for_players(
-                dfs, comparison_pool)
+                dfs, comparison_pool, reference_players=all_players)
             radar_chart = create_radar_chart(
                 base_stats, selected_player, comparison_stats)
             st.plotly_chart(radar_chart, use_container_width=True)
@@ -175,14 +198,16 @@ def main():
                 - Each stat group is projected to PCA space.
                 - Distances are computed in that space and weighted by role-specific importance.
                 - A position compatibility factor penalizes distant roles.
+                - Context factors (minutes, age proximity and optional competition match) improve ranking quality.
                 - Overall ranking uses average weighted distance across available stat groups.
                 """
             )
 
 
-def get_stat_group_means_for_players(dfs, players, stat_group=None):
+def get_stat_group_means_for_players(dfs, players, stat_group=None, reference_players=None):
     return {
-        player: compute_stat_group_means(dfs, player, stat_group=stat_group)
+        player: compute_stat_group_means(
+            dfs, player, stat_group=stat_group, reference_players=reference_players)
         for player in players
     }
 
