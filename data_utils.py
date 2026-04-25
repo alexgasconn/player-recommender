@@ -1,11 +1,44 @@
 # data_utils.py
 import pandas as pd
 import numpy as np
+import requests
+import time
+from io import StringIO
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 import streamlit as st
 from config import urls, stat_keys
+
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _read_html_with_retry(url: str, retries: int = 3, timeout: int = 20) -> pd.DataFrame:
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.get(
+                url, headers=DEFAULT_HEADERS, timeout=timeout)
+            response.raise_for_status()
+            tables = pd.read_html(StringIO(response.text))
+            if not tables:
+                raise ValueError(f"No HTML tables found in {url}")
+            return tables[0]
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(1.2 * attempt)
+
+    raise RuntimeError(
+        f"Failed to fetch FBRef data from {url}: {last_error}") from last_error
 
 
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -24,7 +57,7 @@ def _extract_age_year(age_value):
 
 @st.cache_data(show_spinner=False)
 def load_and_process(url_key):
-    df = pd.read_html(urls[url_key])[0]
+    df = _read_html_with_retry(urls[url_key])
     df = _flatten_columns(df)
 
     if "player" in df.columns:
@@ -92,7 +125,19 @@ def apply_pca_kmeans(df: pd.DataFrame, name: str):
 @st.cache_data(show_spinner=False)
 def load_all_stat_dfs():
     dfs = {}
+    failed = []
     for key in stat_keys:
-        df = load_and_process(key)
-        dfs[key] = apply_pca_kmeans(df, key)
+        try:
+            df = load_and_process(key)
+            dfs[key] = apply_pca_kmeans(df, key)
+        except Exception:
+            failed.append(key)
+
+    if not dfs:
+        failed_text = ", ".join(failed) if failed else "unknown sources"
+        raise RuntimeError(
+            "Unable to load player data from FBRef. "
+            f"Failed stat groups: {failed_text}."
+        )
+
     return dfs

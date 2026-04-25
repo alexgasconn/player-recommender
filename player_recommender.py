@@ -27,8 +27,16 @@ def main():
     )
     st.markdown("---")
 
-    with st.spinner("Loading player data and computing PCA + Clustering..."):
-        dfs = load_all_stat_dfs()
+    try:
+        with st.spinner("Loading player data and computing PCA + Clustering..."):
+            dfs = load_all_stat_dfs()
+    except Exception as exc:
+        st.error(
+            "Data loading failed (FBRef request error). Please retry in a moment; "
+            "the source may be temporarily rate-limited."
+        )
+        st.caption(str(exc))
+        return
 
     first_df = next(iter(dfs.values()))
 
